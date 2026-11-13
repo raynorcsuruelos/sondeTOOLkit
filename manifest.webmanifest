@@ -1,14 +1,13 @@
 {
-  "id": "./",
   "name": "Sonde Toolkit",
-  "short_name": "Sonde",
-  "description": "Kit Finder, O-ring Finder, KPOD PDF search and Sonde FAQs. Works offline.",
-  "start_url": "./",
+  "short_name": "Sonde Toolkit",
+  "description": "Offline Kit Finder, O-ring Finder, kPod, Drawings, and Sonde FAQs",
+  "id": "./",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
-  "orientation": "any",
-  "background_color": "#f4f6f8",
-  "theme_color": "#0b5cad",
+  "background_color": "#0b2344",
+  "theme_color": "#0b2344",
   "icons": [
     {
       "src": "icons/icon-192.png",
@@ -20,13 +19,7 @@
       "src": "icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-maskable-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
+      "purpose": "any maskable"
     }
   ]
 }
