@@ -2,6 +2,75 @@
 
 <html lang="en">
 <head>
+<script>
+/* Native Android SAF folder bridge: feeds the existing filename-only PDF scanners. */
+(function(){
+ if(!window.SondeAndroid || typeof window.SondeAndroid.pickFolder!=='function')return;
+ let pending=null;
+ window.__sondeFolderResult=function(raw){
+   if(!pending)return;
+   const p=pending;pending=null;
+   try {const result=JSON.parse(raw);
+     if(result.cancelled){p.reject(new DOMException('Cancelled','AbortError'));return;}
+     if(result.error){p.reject(new Error(result.error));return;}
+     p.resolve(result);
+   }catch(e){p.reject(e)}
+ };
+ function virtualTree(result){
+   const root={kind:'directory',name:result.name||'PDF folder',children:new Map()};
+   for(const item of result.files||[]){
+     const bits=item.path.split('/');let dir=root;
+     for(const part of bits.slice(0,-1)){
+       if(!dir.children.has(part))dir.children.set(part,{kind:'directory',name:part,children:new Map()});
+       dir=dir.children.get(part);
+     }
+     dir.children.set(item.name,{kind:'file',name:item.name,__nativeUri:item.uri,
+       async getFile(){return new File([''],item.name,{type:'application/pdf',lastModified:item.modified||Date.now()})}});
+   }
+   function decorate(dir){
+     dir.queryPermission=async()=> 'granted';dir.requestPermission=async()=> 'granted';
+     dir.entries=async function*(){for(const pair of this.children)yield pair};
+     for(const entry of dir.children.values())if(entry.kind==='directory')decorate(entry);
+   }
+   decorate(root);return root;
+ }
+ window.showDirectoryPicker=async function(){
+   const result=await new Promise((resolve,reject)=>{pending={resolve,reject};window.SondeAndroid.pickFolder()});
+   return virtualTree(result);
+ };
+ window.__sondeNativeOpen=function(entry){
+   const uri=entry?.handle?.__nativeUri || entry?.__nativeUri;
+   if(!uri)return false;
+   window.SondeAndroid.openPdf(uri);return true;
+ };
+})();
+</script>
+
+<script>
+/* Android export bridge: intercept only downloadable blob anchors. */
+(function(){
+  if(!window.SondeAndroid || typeof window.SondeAndroid.saveBase64!=='function') return;
+  const nativeClick=HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click=function(){
+    const link=this;
+    if(link.hasAttribute('download') && String(link.href).startsWith('blob:')){
+      const filename=link.getAttribute('download')||'sonde-export.bin';
+      fetch(link.href).then(r=>{if(!r.ok)throw Error('Blob read failed');return r.blob()})
+        .then(blob=>new Promise((resolve,reject)=>{
+          const reader=new FileReader();
+          reader.onerror=()=>reject(Error('Export read failed'));
+          reader.onload=()=>resolve({data:String(reader.result).split(',')[1],mime:blob.type});
+          reader.readAsDataURL(blob);
+        }))
+        .then(({data,mime})=>window.SondeAndroid.saveBase64(data,filename,mime||'application/octet-stream'))
+        .catch(err=>alert('Android export failed: '+err.message));
+      return;
+    }
+    return nativeClick.apply(this,arguments);
+  };
+})();
+</script>
+
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1" name="viewport"/>
 <title>Sonde Toolkit V14.8</title>
@@ -21,7 +90,76 @@
 #paneKpod>.card:first-child>.kp-top,#tool-drawing>.card:first-child>.kp-top{width:100%;align-items:center;gap:12px}
 #paneKpod>.card:first-child>.kp-top>div:first-child,#tool-drawing>.card:first-child>.kp-top>div:first-child{min-width:0;flex:1}
 @media(max-width:650px){#paneKpod>.card:first-child,#tool-drawing>.card:first-child{min-height:112px;height:auto!important}}
-</style><meta name="sonde-toolkit-build" content="14.4"/></head>
+</style><meta name="sonde-toolkit-build" content="14.4"/>
+<style id="sonde-folder-responsive-v1512">
+/* Shared kPod / Drawings folder card layout. Prevent narrow text columns. */
+#paneKpod > .card:first-child > .kp-top,
+#tool-drawing > .card:first-child > .kp-top {
+  display:grid !important;
+  grid-template-columns:minmax(0,1fr);
+  align-items:start !important;
+  gap:14px !important;
+  width:100%;
+}
+#paneKpod .kp-top > div:first-child,
+#tool-drawing .kp-top > div:first-child {
+  min-width:0 !important;
+  width:100%;
+  max-width:100%;
+  flex:none !important;
+}
+#paneKpod .kp-top .fname,
+#tool-drawing .kp-top .fname {
+  width:100%;
+  max-width:100%;
+  min-width:0;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  word-break:normal !important;
+  line-height:1.35;
+}
+#paneKpod .kp-top .meta,
+#tool-drawing .kp-top .meta {
+  overflow-wrap:anywhere;
+  word-break:normal;
+}
+#paneKpod .kp-top > .row,
+#tool-drawing .kp-top > .row {
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:flex-start;
+  align-items:center;
+  gap:8px;
+  width:100%;
+  min-width:0;
+}
+#paneKpod .kp-top > .row .btn,
+#tool-drawing .kp-top > .row .btn {
+  flex:0 1 auto;
+  width:auto;
+  max-width:100%;
+  white-space:normal;
+}
+#paneKpod > .card:first-child,
+#tool-drawing > .card:first-child {
+  height:auto !important;
+  min-height:0 !important;
+}
+@media(min-width:850px) {
+  #paneKpod > .card:first-child > .kp-top,
+  #tool-drawing > .card:first-child > .kp-top {
+    grid-template-columns:minmax(0,1fr) auto;
+    align-items:center !important;
+  }
+  #paneKpod .kp-top > .row,
+  #tool-drawing .kp-top > .row {width:auto;justify-content:flex-end}
+}
+@media(max-width:420px) {
+  #paneKpod .kp-top > .row .btn,
+  #tool-drawing .kp-top > .row .btn {padding:10px 12px;font-size:14px}
+}
+</style>
+</head>
 <body>
 <header>
 <div class="brand">
@@ -1554,6 +1692,7 @@ function kpSearch() {
 async function kpGetFile(r) { return r.handle ? await r.handle.getFile() : r.file; }
 async function kpOpen(i) {
   const r = kpFiles[i]; if (!r) return;
+  if(window.__sondeNativeOpen?.(r))return;
   const w = window.open('', '_blank');
   try {
     const f = await kpGetFile(r), url = URL.createObjectURL(new Blob([f], {type: 'application/pdf'}));
@@ -2102,7 +2241,8 @@ async function reconnect(){const s=state;if(s.fallback){$('dfPick').click();retu
 async function remove(){const s=state;if(!confirm('Remove this Drawings folder reference? Files will not be deleted.'))return;s.generation++;searchCache.files=null;Object.assign(s,{handle:null,files:[],name:'',fallback:false,permission:false,scanning:false,scanned:0});erase(kind).catch(e=>console.warn(e));ui();search()}
 function search(){const s=state;if(!s.handle&&!s.fallback){$('dfResults').replaceChildren();return;}if(s.permission)return msg('Reconnect the selected folder to search.');if(s.scanning&&!s.files.length)return msg('Scanning folder…');if(!s.files.length)return msg('No PDF files found in the selected folder.');const raw=$('dfInput').value.trim(),toks=raw.toLocaleLowerCase().split(/\s+/).filter(Boolean);if(!toks.length){$('dfResults').replaceChildren();return}const sub=$('dfSubfolders').checked;const sort=$('dfSort').value;const rows=SONDE_PDF_SEARCH.query(s.files,raw,sub,sort,searchCache);if(!rows.length)return msg('No drawings match “'+raw+'”.');if(!showAll)visibleCount=100;const visible=rows.slice(0,Math.min(rows.length,visibleCount));let h='<div class="meta" role="status">'+rows.length+' matching drawing(s) · select a row to open</div><div class="card" style="padding:0"><div class="tw" style="max-height:620px"><table class="rt"><thead><tr><th>Drawing</th><th>Modified</th><th class="q">Size</th><th></th></tr></thead><tbody>';for(const {f,i}of visible)h+='<tr class="click" tabindex="0" role="button" data-df="'+i+'"><td class="pn"><b>'+esc(f.name)+'</b>'+(f.dir?'<small>'+esc(f.dir)+'</small>':'')+'</td><td class="kp-t">'+esc(date(f.t))+'</td><td class="q">'+esc(size(f.size))+'</td><td><button class="btn sec" type="button" data-dfsave="'+i+'">Save</button></td></tr>';h+='</tbody></table></div></div>';if(visible.length<rows.length)h+='<button class="btn sec" id="dfMore" type="button">Show next '+Math.min(100,rows.length-visible.length)+' · '+visible.length+' of '+rows.length+' shown</button>';$('dfResults').innerHTML=h;const more=$('dfMore');if(more)more.onclick=()=>{showAll=true;visibleCount+=100;search()}}
 async function file(f){return f.handle?f.handle.getFile():f.file}
-async function open(i,save){const f=state.files[i];if(!f)return;const canPreview=preview.test(f.name);const tab=!save&&canPreview?window.open('','_blank'):null;try{const blob=await file(f),url=URL.createObjectURL(blob);if(save||!canPreview){const a=document.createElement('a');a.href=url;a.download=f.name;document.body.append(a);a.click();a.remove();if(tab)tab.close()}else if(tab)tab.location.href=url;else{const a=document.createElement('a');a.href=url;a.download=f.name;document.body.append(a);a.click();a.remove()}setTimeout(()=>URL.revokeObjectURL(url),canPreview?600000:30000)}catch(e){if(tab)tab.close();msg('Could not open drawing: '+e.message)}}
+async function open(i,save){const f=state.files[i];if(!f)return;
+if(!save && window.__sondeNativeOpen?.(f))return;const canPreview=preview.test(f.name);const tab=!save&&canPreview?window.open('','_blank'):null;try{const blob=await file(f),url=URL.createObjectURL(blob);if(save||!canPreview){const a=document.createElement('a');a.href=url;a.download=f.name;document.body.append(a);a.click();a.remove();if(tab)tab.close()}else if(tab)tab.location.href=url;else{const a=document.createElement('a');a.href=url;a.download=f.name;document.body.append(a);a.click();a.remove()}setTimeout(()=>URL.revokeObjectURL(url),canPreview?600000:30000)}catch(e){if(tab)tab.close();msg('Could not open drawing: '+e.message)}}
 $('dfAdd').onclick=choose;$('dfPick').onchange=fallback;$('dfRescan').onclick=()=>{const s=state;if(s.permission||s.fallback)reconnect();else scan()};$('dfRemove').onclick=remove;$('dfInput').oninput=()=>{showAll=false;clearTimeout(timer);timer=setTimeout(search,120)};$('dfSubfolders').onchange=()=>{showAll=false;search()};$('dfSort').onchange=()=>{showAll=false;search()};$('dfResults').onclick=e=>{const save=e.target.closest('[data-dfsave]');if(save){e.stopPropagation();open(+save.dataset.dfsave,true);return}const tr=e.target.closest('[data-df]');if(tr)open(+tr.dataset.df,false)};$('dfResults').onkeydown=e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('tr[data-df]')){e.preventDefault();open(+e.target.dataset.df,false)}};
 async function restore(){if(!supported)return;try{const h=await read(kind);if(!h){ui();search();return;}const s=state;s.handle=h;s.name=h.name;const perm=await SONDE_FOLDER_ACCESS.status(h);if(perm==='granted')await scan();else s.permission=true}catch(e){console.warn('Drawings restore:',e)}ui();search()}
 ui();search();restore();
